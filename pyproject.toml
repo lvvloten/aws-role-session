@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aws_role_session"
+version = "0.0.1"
+authors = [
+  { name="Lucas van Braam van Vloten", email="lucas2@dds.nl" },
+]
+description = "Conveniently use roles to automate cross-account actions in an enviroment with multiple root accounts"
+keywords = ["aws", "cross-account"]
+readme = "README.md"
+license = { file="LICENSE" }
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+  "tomlkit >= 0.11.1",
+  "boto3 >= 1.24.44",
+  "pyotp >= 2.6.0"
+]
+[project.urls]
+"Homepage" = "https://github.com/lvvloten/aws-role-session"
+"Bug Tracker" = "https://github.com/lvvloten/aws-role-session/issues"
