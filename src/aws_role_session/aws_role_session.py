@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 
 import boto3
 import pyotp
@@ -26,8 +26,7 @@ class AwsRoleSession:
         self._aws_config_parser = AwsConfigParser(profile)
         self._use_mfa = use_mfa if use_mfa is not None else self._config.default_use_mfa
         self._sts_client_object = None
-        self._role_session_object = None
-        self._role_session_account = None
+        self._role_sessions = []
 
     @property
     def _retry_config(self) -> Config:
@@ -80,20 +79,41 @@ class AwsRoleSession:
 
     def _role_session(self, account_name: str) -> boto3.Session:
         """
-        _role_session is the boto3 Session object that represents the assumed
-        role in the given account
+        _role_session provides the boto3 Session object that represents the
+        assumed role in the given account
+
+        Args:
+            account_name (str): The account in which the session runs
+
+        Returns:
+            Session: The currently active boto3 Session object under the assumed role in the
+            given account
         """
-        # There is no way to derive from the Session object to which account it
-        # is connected. To avoid that a new session is created unnecessarily,
-        # for example when multiple clients or resources are created in the
-        # same account, the account name is stored in a separate variable
-        if (
-            self._role_session_object is None
-            or self._role_session_account != account_name
-        ):
-            self._role_session_object = self._get_role_session(account_name)
-            self._role_session_account = account_name
-        return self._role_session_object
+        # To avoid that a new session is created unnecessarily, for example when
+        # multiple clients or resources are created in the same account, any
+        # session that is created is stored in a variable together with the
+        # account name.
+        # Note that all sessions have a lifetime of 3600 seconds. It is assumed
+        # that this code will never run that long so there is no check whether
+        # a session has already expired.
+        # if session := self._existing_role_session(account_name) is None:
+        #    session = self._get_role_session(account_name)
+        # return session
+        return (
+            session
+            if (session := self._existing_role_session(account_name)) is not None
+            else self._get_role_session(account_name)
+        )
+
+    def _existing_role_session(self, account_name):
+        return next(
+            (
+                item["session"]
+                for item in self._role_sessions
+                if item["account"] == account_name
+            ),
+            None,
+        )
 
     def _otp(self) -> str:
         """
@@ -126,12 +146,19 @@ class AwsRoleSession:
                 session_token_config.update(
                     {
                         "SerialNumber": self._aws_config_parser.profile_mfa_serial,
-                        "TokenCode": self._otp,
+                        "TokenCode": self._otp(),
                     }
                 )
 
             result = base_sts_client.get_session_token(**session_token_config)
             self._aws_config_parser.store_temp_profile(**result["Credentials"])
+
+    def _get_role(self, account_name: str) -> Union[str, None]:
+        return (
+            self._config.account_role(account_name)
+            if self._role_name is None
+            else self._role_name
+        )
 
     def _get_role_session(self, account_name: str) -> boto3.Session:
         """Assume a role in the given account and use it to open a session
@@ -140,17 +167,29 @@ class AwsRoleSession:
             account_name (str): The account in which the session should be opened
                                 This account must be specified in the
                                 aws_role_session.toml configuration file.
+
+        Returns:
+            Session: A new boto3 Session object under the assumed role in the
+            given account
         """
-        account_id = self._config.account_id_for_name(account_name)
-        role_to_assume = f"arn:aws:iam::{account_id}:role/{self._role_name}"
         role_credentials = self._sts_client.assume_role(
-            RoleArn=role_to_assume,
+            RoleArn=self._role_to_assume(account_name),
             RoleSessionName=f"assume-{account_name}",
             DurationSeconds=3600,
         )
-        return boto3.Session(
+        result = boto3.Session(
             aws_access_key_id=role_credentials["Credentials"]["AccessKeyId"],
             aws_secret_access_key=role_credentials["Credentials"]["SecretAccessKey"],
             aws_session_token=role_credentials["Credentials"]["SessionToken"],
             region_name=self._aws_config_parser.aws_region,
         )
+        self._role_sessions.append({"account": account_name, "session": result})
+        return result
+
+    def _role_to_assume(self, account_name):
+        account_id = self._config.account_id_for_name(account_name)
+        if (role_name := self._get_role(account_name)) is None:
+            raise RuntimeError(
+                f"No role was configured for account {account_name}, or passed to the class."
+            )
+        return f"arn:aws:iam::{account_id}:role/{role_name}"

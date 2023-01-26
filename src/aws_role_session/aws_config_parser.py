@@ -1,7 +1,7 @@
 import os
 from configparser import ConfigParser, SectionProxy
 from datetime import datetime, timezone
-from typing import Any, Optional, Union
+from typing import Optional, Union
 
 DEFAULT_REGION = "eu-west-1"
 
@@ -39,7 +39,7 @@ class AwsConfigParser(ConfigParser):
     @property
     def profile_name(self) -> str:
         """The name of the base profile in the credentials file that is used for initial authentication"""
-        return self.profile.name
+        return self.credentials_profile.name
 
     @profile_name.setter
     def profile_name(self, value: str) -> None:
@@ -52,7 +52,7 @@ class AwsConfigParser(ConfigParser):
             )
         self._profile_name = value
         # This will generate an exception in case the profile does not exist
-        _ = self.profile.name
+        _ = self.credentials_profile.name
 
     @property
     def temp_profile_name(self) -> str:
@@ -75,21 +75,24 @@ class AwsConfigParser(ConfigParser):
         """
         return (
             region
-            if (region := self.profile.get("aws_region", None)) is not None
+            if (region := self.credentials_profile.get("aws_region", None)) is not None
             else self._default_region
         )
 
-    @property
+
     def _credentials_file(self) -> str:
         # The AWS credentials file is expected to be in the default location
         # The actual path depends on the platform
-        filename = os.path.join(os.path.expanduser("~"), ".aws", "credentials")
-        if not os.path.exists(filename):
-            raise RuntimeError(f"AWS Credentials file {filename} does not exist")
-        return filename
+        return os.path.join(os.path.expanduser("~"), ".aws", "credentials")
 
     @property
-    def profile(self) -> Union(SectionProxy, None):
+    def _config_file(self) -> str:
+        # The AWS config file is expected to be in the default location
+        # The actual path depends on the platform
+        return os.path.join(os.path.expanduser("~"), ".aws", "config")
+
+    @property
+    def credentials_profile(self) -> Union[SectionProxy, None]:
         """The base profile that has been read from the credentials file."""
         return self._read_profile(
             profile_name=self._profile_name,
@@ -97,7 +100,19 @@ class AwsConfigParser(ConfigParser):
         )
 
     @property
-    def temp_profile(self) -> Union(SectionProxy, None):
+    def config_profile(self) -> Union[SectionProxy, None]:
+        """
+        Any additional settings for the base profile that have been read from
+        the config file.
+        """
+        config_profile_name = f"profile {self._profile_name}"
+        return self._read_profile(
+            profile_name=config_profile_name,
+            allow_missing_profile=True,
+        )
+
+    @property
+    def temp_profile(self) -> Union[SectionProxy, None]:
         """
         The temporary profile as read from the credentials file. Returns
         None if the temporary profile does not exist or is expired.
@@ -110,22 +125,22 @@ class AwsConfigParser(ConfigParser):
     @property
     def profile_access_key_id(self) -> Union[str, None]:
         """The aws_access_key_id from the base profile"""
-        return self._get_setting(self.profile, "aws_access_key_id")
+        return self._get_setting(self.credentials_profile, "aws_access_key_id")
 
     @property
     def profile_secret_access_key(self) -> Union[str, None]:
         """The aws_secret_access_key from the base profile"""
-        return self._get_setting(self.profile, "aws_secret_access_key")
+        return self._get_setting(self.credentials_profile, "aws_secret_access_key")
 
     @property
     def profile_mfa_serial(self) -> Union[str, None]:
         """The mfa_serial from the base profile"""
-        return self._get_setting(self.profile, "mfa_serial")
+        return self._get_setting(self.credentials_profile, "mfa_serial")
 
     @property
     def profile_mfa_key(self) -> Union[str, None]:
         """The mfa_key from the base profile"""
-        return self._get_setting(self.profile, "mfa_key")
+        return self._get_setting(self.credentials_profile, "mfa_key")
 
     @property
     def profile_mfa_is_configured(self) -> bool:
@@ -175,7 +190,18 @@ class AwsConfigParser(ConfigParser):
         )
 
     def _read_config(self) -> None:
+        """
+        Read the AWS configuration from both credentials file. Raise an exception
+        in case the credentials file does not exist. Also raise an exception in
+        case the credentials file does not contain any sections (profiles).
+        """
+        if not os.path.exists(self._credentials_file):
+            raise RuntimeError(
+                f"AWS Credentials file {self._credentials_file} does not exist"
+            )
         self.read(self._credentials_file)
+        # The ConfigParser.read() method reads all existing files in the iterable.
+        # Files that cannot be opened are silently ignored.
         if not self.sections():
             raise RuntimeError(
                 f"AWS Credentials File {self._credentials_file} does not contain any sections"
@@ -216,6 +242,14 @@ class AwsConfigParser(ConfigParser):
     ) -> Union[str, bool, None]:
         return profile.get(setting_name, None) if profile is not None else None
 
+    def _get_profile_setting(self, setting_name: str) -> Union[str, bool, None]:
+        setting_value = (
+            self.credentials_profile.get(setting_name, None)
+            if self.credentials_profile is not None
+            else None
+        )
+        return setting_value
+
     def store_temp_profile(
         self,
         AccessKeyId: str,
@@ -227,12 +261,12 @@ class AwsConfigParser(ConfigParser):
         # This method is designed to directly accept the Credentials section from the STS
         # get_session_token response, which is in snake case
         # pylint: disable=invalid-name
-        if self.temp_profile is None:
-            self.add_section(self.temp_profile_name)
-        self.temp_profile["aws_access_key_id"] = AccessKeyId
-        self.temp_profile["aws_secret_access_key"] = SecretAccessKey
-        self.temp_profile["aws_session_token"] = SessionToken
-        self.temp_profile["expiration_utc"] = datetime.isoformat(Expiration)
+        self[self.temp_profile_name] = {}  # add new profile or clear existing profile
+        temp_profile = self[self.temp_profile_name]
+        temp_profile["aws_access_key_id"] = AccessKeyId
+        temp_profile["aws_secret_access_key"] = SecretAccessKey
+        temp_profile["aws_session_token"] = SessionToken
+        temp_profile["expiration_utc"] = datetime.isoformat(Expiration)
         with open(
             file=self._credentials_file, mode="wt", encoding="UTF-8"
         ) as configfile:

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aws_role_session"
-version = "0.0.1"
+version = "0.0.8"
 authors = [
   { name="Lucas van Braam van Vloten", email="lucas2@dds.nl" },
 ]
@@ -14,16 +14,30 @@ readme = "README.md"
 license = { file="LICENSE" }
 requires-python = ">=3.8"
 classifiers = [
-    "Programming Language :: Python :: 3",
+    "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3 :: Only",
 ]
 dependencies = [
   "boto3 >= 1.24.44",
   "jsonschema >= 4.9.1",
   "pyotp >= 2.6.0",
-  "toml >= 0.10.2"
+  "toml >= 0.10.2",
+  "typing >= 3.7.4"
 ]
+
 [project.urls]
 "Homepage" = "https://github.com/lvvloten/aws-role-session"
 "Bug Tracker" = "https://github.com/lvvloten/aws-role-session/issues"
+
+[tool.pylint.FORMAT]
+max-line-length=130
+disable=missing-docstring

@@ -133,3 +133,8 @@ dmypy.json
 .vscode/
 # local development files
 dev/
+# Apple
+.DS_Store
+
+#unotes
+.unotes
